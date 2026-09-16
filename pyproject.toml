@@ -1,0 +1,18 @@
+[project]
+name = "wordle-tracker"
+version = "0.1.0"
+description = "Interactive Wordle probability tracker"
+requires-python = ">=3.9"
+
+[project.scripts]
+wordle-tracker = "wordle_tracker.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["wordle_tracker*"]
+
+[tool.setuptools.package-data]
+wordle_tracker = ["data/*.txt"]
