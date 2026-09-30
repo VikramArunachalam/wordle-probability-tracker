@@ -16,6 +16,7 @@ import streamlit as st
 from wordle_tracker.candidates import filter_candidates
 from wordle_tracker.feedback import GRAY, GREEN, YELLOW, compute_feedback
 from wordle_tracker.probability import informed_probability, naive_probability
+from wordle_tracker.vectorized import estimate_seconds, prepare_turns, run_full_analysis
 
 DATA_DIR = Path(__file__).parent / "data"
 MAX_GUESSES = 6
@@ -206,6 +207,9 @@ def init_state(guesses: set[str]) -> None:
     st.session_state.setdefault("status", "playing")  # playing, won, lost
     st.session_state.setdefault("error", None)
     st.session_state.setdefault("stats_history", [])
+    st.session_state.setdefault("analysis_turns", None)
+    st.session_state.setdefault("analysis_estimate", None)
+    st.session_state.setdefault("analysis_results", None)
 
 
 def reset_game(guesses: set[str]) -> None:
@@ -216,6 +220,9 @@ def reset_game(guesses: set[str]) -> None:
     st.session_state.status = "playing"
     st.session_state.error = None
     st.session_state.stats_history = []
+    st.session_state.analysis_turns = None
+    st.session_state.analysis_estimate = None
+    st.session_state.analysis_results = None
 
 
 def render_stats_history(stats_history: list[dict]) -> None:
@@ -250,11 +257,100 @@ def render_candidate_list(candidates: list[str], label: str | None = None) -> No
         st.markdown(f'<div class="candidate-grid">{chips}</div>', unsafe_allow_html=True)
 
 
+def render_probability_explainer(n: int, naive_p: float, informed_p: float) -> None:
+    unique = round(informed_p * n)
+    with st.expander("Why are these two numbers different?"):
+        st.markdown(
+            f"""
+Both start from the same {n} candidates left. The difference is what each one
+assumes about how you pick your next guess.
+
+Naive is just 1/{n} — the odds if you grabbed one of the {n} at random and
+hoped. It treats every word as equally good, because it doesn't know anything
+about them beyond "still possible."
+
+Informed assumes you pick the *best* word out of those {n}, not a random one.
+Here's the thing that makes that different: guessing a word doesn't just
+maybe get you the answer, it also gives you a color pattern, and that pattern
+splits the remaining candidates into groups. Some guesses barely split
+anything up. The best one available here would put {unique} of the {n}
+candidates each in a group of their own — so if the secret happens to be one
+of those, that single guess nails it. That's where {informed_p:.1%} comes
+from.
+
+Informed can't be lower than naive (worst case, a guess at least isolates
+itself), and the gap between them is really just the value of the color
+feedback — the more it helps you tell candidates apart, the bigger informed
+gets relative to naive.
+"""
+        )
+
+
+def render_analysis_results(results: list[dict], guess_pool_size: int) -> None:
+    st.markdown("#### How each guess compared to the field")
+    with st.expander("What do these columns mean?"):
+        st.markdown(
+            f"""
+There are two different pools of words here, and they're easy to mix up.
+
+"Remaining candidates" is how many words the secret could still be *after*
+that turn's guess narrowed things down.
+
+"The field" is different: it's every one of the {guess_pool_size:,} valid
+words you could have typed instead. That pool doesn't shrink as the game
+goes on, because you're always free to guess any valid word, not just one
+of the remaining candidates. Typing a word you already know is wrong,
+purely to gather information, is a real strategy, so the field stays the
+same size the whole game even as the candidates shrink around it.
+
+Each word in the field gets scored against what actually happened: given the
+secret really was what it was, how many candidates would guessing that word
+*actually* have left behind (not a guess about what it might do on average —
+the real outcome, since we already know the answer at this point). Fewer
+left over is better. A word that would have pinned the answer down
+completely scores 1; one that tells you nothing scores the same as the
+number of candidates you started that turn with.
+
+Guessing the literal secret always scores a perfect 1 by this measure — it
+can't be beaten, only tied — which wasn't true of an earlier version of this
+that scored guesses by their average performance across every *hypothetical*
+secret instead of the real one. That version could occasionally rate a
+guess you knew was wrong (a pure information-gathering "scout" word) above
+the guess that actually won, which was correct in its own terms but a
+strange thing to see next to a guess that solved the puzzle.
+
+"Beat this % of the field" is the percentage of the field that would have
+left *more* candidates behind than the word you actually typed did.
+
+"Typical guess would leave" is what a perfectly median guess would have left
+you with that turn. It's not always close to your own result, and that's
+fine — a handful of unusually sharp words can pull the field's *average*
+lower than what a typical guess actually leaves behind, so this is a
+steadier reference point than an average would be.
+"""
+        )
+    rows = []
+    for r in results:
+        rows.append(
+            f"<tr><td>Guess {r['turn']}</td><td>{r['guess'].upper()}</td>"
+            f"<td>{r['n_after']}</td><td>{r['percentile']:.0f}%</td>"
+            f"<td>~{r['median_remaining']:.1f}</td></tr>"
+        )
+    st.markdown(
+        '<div class="stats-history-wrap"><table class="stats-history"><thead><tr>'
+        "<th>Guess</th><th>Word</th><th>Remaining candidates</th>"
+        "<th>Beat this % of the field</th><th>Typical guess would leave</th>"
+        f"</tr></thead><tbody>{''.join(rows)}</tbody></table></div>",
+        unsafe_allow_html=True,
+    )
+
+
 def main() -> None:
     inject_css()
     st.markdown('<div class="wordle-title">Wordle Probability Tracker</div>', unsafe_allow_html=True)
 
-    guesses = set(load_word_list(DATA_DIR / "guesses.txt"))
+    word_list = load_word_list(DATA_DIR / "guesses.txt")
+    guesses = set(word_list)
     init_state(guesses)
 
     with st.sidebar:
@@ -324,6 +420,7 @@ def main() -> None:
                 f'<div class="stat-value">{informed_p:.1%}</div></div>',
                 unsafe_allow_html=True,
             )
+            render_probability_explainer(n, naive_p, informed_p)
         elif mode in ("informed", "both") and skip_informed:
             st.caption("Informed odds skipped on the first guess (no info yet) -- using naive.")
 
@@ -378,6 +475,30 @@ def main() -> None:
                         st.session_state.candidates, st.session_state.guess_history
                     )
             st.rerun()
+
+    if st.session_state.status in ("won", "lost"):
+        if st.session_state.analysis_results is not None:
+            render_analysis_results(st.session_state.analysis_results, len(word_list))
+        else:
+            if st.session_state.analysis_turns is None:
+                turns = prepare_turns(st.session_state.guess_history, word_list, secret)
+                st.session_state.analysis_turns = turns
+                st.session_state.analysis_estimate = estimate_seconds(turns, word_list)
+
+            turns = st.session_state.analysis_turns
+            est = st.session_state.analysis_estimate
+            if st.button(f"Run full guess-quality analysis (est. ~{est:.1f}s)"):
+                progress = st.progress(0.0, text="Scoring guesses against the field...")
+                results = run_full_analysis(
+                    turns,
+                    word_list,
+                    progress_cb=lambda f: progress.progress(
+                        f, text=f"Scoring guesses against the field... {f:.0%}"
+                    ),
+                )
+                progress.empty()
+                st.session_state.analysis_results = results
+                st.rerun()
 
     if st.session_state.error:
         st.error(st.session_state.error)
