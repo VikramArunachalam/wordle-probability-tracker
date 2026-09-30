@@ -286,49 +286,8 @@ gets relative to naive.
         )
 
 
-def render_analysis_results(results: list[dict], guess_pool_size: int) -> None:
+def render_analysis_results(results: list[dict]) -> None:
     st.markdown("#### How each guess compared to the field")
-    with st.expander("What do these columns mean?"):
-        st.markdown(
-            f"""
-There are two different pools of words here, and they're easy to mix up.
-
-"Remaining candidates" is how many words the secret could still be *after*
-that turn's guess narrowed things down.
-
-"The field" is different: it's every one of the {guess_pool_size:,} valid
-words you could have typed instead. That pool doesn't shrink as the game
-goes on, because you're always free to guess any valid word, not just one
-of the remaining candidates. Typing a word you already know is wrong,
-purely to gather information, is a real strategy, so the field stays the
-same size the whole game even as the candidates shrink around it.
-
-Each word in the field gets scored against what actually happened: given the
-secret really was what it was, how many candidates would guessing that word
-*actually* have left behind (not a guess about what it might do on average —
-the real outcome, since we already know the answer at this point). Fewer
-left over is better. A word that would have pinned the answer down
-completely scores 1; one that tells you nothing scores the same as the
-number of candidates you started that turn with.
-
-Guessing the literal secret always scores a perfect 1 by this measure — it
-can't be beaten, only tied — which wasn't true of an earlier version of this
-that scored guesses by their average performance across every *hypothetical*
-secret instead of the real one. That version could occasionally rate a
-guess you knew was wrong (a pure information-gathering "scout" word) above
-the guess that actually won, which was correct in its own terms but a
-strange thing to see next to a guess that solved the puzzle.
-
-"Beat this % of the field" is the percentage of the field that would have
-left *more* candidates behind than the word you actually typed did.
-
-"Typical guess would leave" is what a perfectly median guess would have left
-you with that turn. It's not always close to your own result, and that's
-fine — a handful of unusually sharp words can pull the field's *average*
-lower than what a typical guess actually leaves behind, so this is a
-steadier reference point than an average would be.
-"""
-        )
     rows = []
     for r in results:
         rows.append(
@@ -478,7 +437,7 @@ def main() -> None:
 
     if st.session_state.status in ("won", "lost"):
         if st.session_state.analysis_results is not None:
-            render_analysis_results(st.session_state.analysis_results, len(word_list))
+            render_analysis_results(st.session_state.analysis_results)
         else:
             if st.session_state.analysis_turns is None:
                 turns = prepare_turns(st.session_state.guess_history, word_list, secret)
