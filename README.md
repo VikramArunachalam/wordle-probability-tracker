@@ -24,11 +24,13 @@ pytest tests/
 
 ## Word lists
 
-`wordle_tracker/data/guesses.txt` (12,972 words) is the full standard public
-NYT Wordle valid-guess list, and is used both to validate what you can type
-and as the candidate pool for probability calculations — since a player has
-no way of knowing the secret is actually drawn from a smaller curated
-answer list, the odds shown treat every valid word as equally plausible.
+`wordle_tracker/data/guesses.txt` (14,855 words, from
+[dracos/valid-wordle-words.txt](https://gist.github.com/dracos/dd0668f281e685bad51479e5acaadb93),
+kept in sync with NYT's live valid-guess list) is used both to validate what
+you can type and as the candidate pool for probability calculations — since
+a player has no way of knowing the secret is actually drawn from a smaller
+curated answer list, the odds shown treat every valid word as equally
+plausible.
 `wordle_tracker/data/answers.txt` (2,315 words, the actual NYT answer list)
 ships alongside it but isn't used by the tracker. To use a different list,
 replace `guesses.txt` (one lowercase 5-letter word per line).
