@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st
 
-from wordle_tracker import db
+from wordle_tracker import db, nyt
 from wordle_tracker.candidates import filter_candidates
 from wordle_tracker.feedback import GRAY, GREEN, YELLOW, compute_feedback
 from wordle_tracker.probability import informed_probability, naive_probability
@@ -36,6 +36,13 @@ st.set_page_config(page_title="Wordle Probability Tracker", page_icon="🟩", la
 def load_word_list(path: Path) -> list[str]:
     with open(path) as f:
         return [line.strip() for line in f if line.strip()]
+
+
+@st.cache_data(ttl=300)
+def fetch_daily_secret(puzzle_date) -> str | None:
+    # Short TTL (not the whole day) so a transient fetch failure gets
+    # retried soon rather than caching None until tomorrow.
+    return nyt.fetch_solution(puzzle_date)
 
 
 def inject_css() -> None:
@@ -340,6 +347,14 @@ def main() -> None:
             st.rerun()
 
     if st.session_state.secret is None:
+        puzzle_date = nyt.todays_date()
+        daily = fetch_daily_secret(puzzle_date)
+        if daily and daily in guesses:
+            if st.button(f"Play today's Wordle ({puzzle_date.isoformat()})", use_container_width=True):
+                st.session_state.secret = daily
+                st.rerun()
+            st.caption("or enter your own word:")
+
         st.write("Enter the secret word to track odds against as you guess.")
         with st.form("secret_form"):
             secret_input = st.text_input("Secret word", max_chars=WORD_LENGTH).strip().lower()
