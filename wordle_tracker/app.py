@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st
 
+from wordle_tracker import db
 from wordle_tracker.candidates import filter_candidates
 from wordle_tracker.feedback import GRAY, GREEN, YELLOW, compute_feedback
 from wordle_tracker.probability import informed_probability, naive_probability
@@ -210,9 +211,14 @@ def init_state(guesses: set[str]) -> None:
     st.session_state.setdefault("analysis_turns", None)
     st.session_state.setdefault("analysis_estimate", None)
     st.session_state.setdefault("analysis_results", None)
+    st.session_state.setdefault("nickname", None)
+    st.session_state.setdefault("user_id", None)
+    st.session_state.setdefault("game_id", None)
 
 
 def reset_game(guesses: set[str]) -> None:
+    # nickname/user_id are intentionally left alone -- they identify the
+    # player across games in this browser session, not just this one game.
     st.session_state.secret = None
     st.session_state.guess_history = []
     st.session_state.candidates = list(guesses)
@@ -223,6 +229,7 @@ def reset_game(guesses: set[str]) -> None:
     st.session_state.analysis_turns = None
     st.session_state.analysis_estimate = None
     st.session_state.analysis_results = None
+    st.session_state.game_id = None
 
 
 def render_stats_history(stats_history: list[dict]) -> None:
@@ -313,6 +320,23 @@ def main() -> None:
     init_state(guesses)
 
     with st.sidebar:
+        st.header("Player")
+        with st.form("nickname_form"):
+            nickname_input = st.text_input(
+                "Nickname (optional, to save stats)",
+                value=st.session_state.nickname or "",
+            )
+            saved_nickname = st.form_submit_button("Save")
+        if saved_nickname and nickname_input.strip():
+            st.session_state.nickname = nickname_input.strip()
+            st.session_state.user_id = db.ensure_user(nickname_input)
+        if st.session_state.user_id:
+            st.caption(f"Saving stats as **{st.session_state.nickname}**.")
+        elif st.session_state.nickname:
+            st.caption("Playing as guest — couldn't reach the stats database.")
+        else:
+            st.caption("Playing as guest (stats won't be saved).")
+
         st.header("Settings")
         mode = st.radio("Probability model", ["naive", "both", "informed"], index=0)
         if st.button("New game", use_container_width=True):
@@ -433,6 +457,11 @@ def main() -> None:
                     st.session_state.candidates = filter_candidates(
                         st.session_state.candidates, st.session_state.guess_history
                     )
+
+                if st.session_state.status in ("won", "lost") and st.session_state.user_id:
+                    st.session_state.game_id = db.save_game(
+                        st.session_state.user_id, secret, won, turn
+                    )
             st.rerun()
 
     if st.session_state.status in ("won", "lost"):
@@ -457,6 +486,8 @@ def main() -> None:
                 )
                 progress.empty()
                 st.session_state.analysis_results = results
+                if st.session_state.user_id and st.session_state.game_id:
+                    db.save_turn_analysis(st.session_state.game_id, results)
                 st.rerun()
 
     if st.session_state.error:
