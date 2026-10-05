@@ -7,29 +7,30 @@ from pathlib import Path
 # project root, so the `wordle_tracker` package isn't importable without this.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+import pandas as pd
 import streamlit as st
 
 from wordle_tracker import db
 
 st.set_page_config(page_title="Wordle Tracker Leaderboard", page_icon="🏆", layout="centered")
 st.markdown("## Leaderboard")
-st.caption(
-    "Ranked by average percentile across every analyzed guess -- how each "
-    "player's guesses stack up against the full field of valid words."
-)
 
 leaderboard = db.get_leaderboard()
 if leaderboard.empty:
     st.caption("No games saved yet -- play a round and save your stats to show up here.")
 else:
+    display = leaderboard.rename(
+        columns={
+            "nickname": "Nickname",
+            "games_played": "Games",
+            "win_rate": "Win rate",
+            **{f"guess_{i}_pct": f"Guess {i}" for i in range(1, db.MAX_GUESSES + 1)},
+        }
+    )
     st.dataframe(
-        leaderboard.style.format(
-            {
-                "win_rate": "{:.0%}",
-                "avg_guesses_to_solve": "{:.2f}",
-                "avg_percentile": "{:.1f}",
-            },
-            na_rep="—",
+        display.style.format(
+            {"Win rate": "{:.0%}", **{f"Guess {i}": "{:.1f}" for i in range(1, db.MAX_GUESSES + 1)}},
+            na_rep="N/A",
         ),
         hide_index=True,
         width="stretch",
@@ -53,11 +54,24 @@ else:
         stats_b = leaderboard[leaderboard["nickname"] == nickname_b].iloc[0]
         col1, col2 = st.columns(2)
         with col1:
-            st.metric(nickname_a, f"{stats_a['avg_percentile']:.1f} avg pct")
-            st.caption(f"{stats_a['games_played']} games, {stats_a['win_rate']:.0%} win rate")
+            st.metric(nickname_a, f"{stats_a['win_rate']:.0%} win rate")
+            st.caption(f"{stats_a['games_played']} games played")
         with col2:
-            st.metric(nickname_b, f"{stats_b['avg_percentile']:.1f} avg pct")
-            st.caption(f"{stats_b['games_played']} games, {stats_b['win_rate']:.0%} win rate")
+            st.metric(nickname_b, f"{stats_b['win_rate']:.0%} win rate")
+            st.caption(f"{stats_b['games_played']} games played")
+
+        per_guess = pd.DataFrame(
+            {
+                "Guess": list(range(1, db.MAX_GUESSES + 1)),
+                nickname_a: [stats_a[f"guess_{i}_pct"] for i in range(1, db.MAX_GUESSES + 1)],
+                nickname_b: [stats_b[f"guess_{i}_pct"] for i in range(1, db.MAX_GUESSES + 1)],
+            }
+        )
+        st.dataframe(
+            per_guess.style.format({nickname_a: "{:.1f}", nickname_b: "{:.1f}"}, na_rep="N/A"),
+            hide_index=True,
+            width="stretch",
+        )
 
         shared = db.get_shared_secret_games(nickname_a, nickname_b)
         if shared.empty:

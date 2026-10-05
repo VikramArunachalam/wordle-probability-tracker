@@ -9,9 +9,6 @@ each turn -- see probability.py's pure-Python version for the O(n^2)
 single-guess case that stays fast enough without this.
 """
 
-import random
-import time
-
 import numpy as np
 
 from wordle_tracker.candidates import filter_candidates
@@ -121,24 +118,6 @@ def prepare_turns(
             }
         )
     return turns
-
-
-def estimate_seconds(turns: list[dict], all_words: list[str], sample_size: int = 300) -> float:
-    """Extrapolate full-analysis runtime from timing a small random sample of guesses.
-
-    Cost per turn is dominated by one O(n) vector op per guess word scored,
-    so timing a sample and scaling by (len(all_words) / sample_size) tracks
-    actual runtime closely regardless of machine speed -- see the
-    calibration check this was validated against before use.
-    """
-    sample = random.sample(all_words, min(sample_size, len(all_words)))
-    total = 0.0
-    for rec in turns:
-        t0 = time.perf_counter()
-        opening_scores(sample, rec["candidates"], rec["secret_idx"])
-        t1 = time.perf_counter()
-        total += (t1 - t0) * (len(all_words) / len(sample))
-    return total
 
 
 def run_full_analysis(turns: list[dict], all_words: list[str], progress_cb=None) -> list[dict]:

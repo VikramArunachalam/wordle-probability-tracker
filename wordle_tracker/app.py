@@ -17,7 +17,7 @@ from wordle_tracker import db
 from wordle_tracker.candidates import filter_candidates
 from wordle_tracker.feedback import GRAY, GREEN, YELLOW, compute_feedback
 from wordle_tracker.probability import informed_probability, naive_probability
-from wordle_tracker.vectorized import estimate_seconds, prepare_turns, run_full_analysis
+from wordle_tracker.vectorized import prepare_turns, run_full_analysis
 
 DATA_DIR = Path(__file__).parent / "data"
 MAX_GUESSES = 6
@@ -208,8 +208,6 @@ def init_state(guesses: set[str]) -> None:
     st.session_state.setdefault("status", "playing")  # playing, won, lost
     st.session_state.setdefault("error", None)
     st.session_state.setdefault("stats_history", [])
-    st.session_state.setdefault("analysis_turns", None)
-    st.session_state.setdefault("analysis_estimate", None)
     st.session_state.setdefault("analysis_results", None)
     st.session_state.setdefault("nickname", None)
     st.session_state.setdefault("user_id", None)
@@ -226,8 +224,6 @@ def reset_game(guesses: set[str]) -> None:
     st.session_state.status = "playing"
     st.session_state.error = None
     st.session_state.stats_history = []
-    st.session_state.analysis_turns = None
-    st.session_state.analysis_estimate = None
     st.session_state.analysis_results = None
     st.session_state.game_id = None
 
@@ -240,12 +236,12 @@ def render_stats_history(stats_history: list[dict]) -> None:
         naive_cell = f"1/{rec['n']} ({rec['naive_p']:.1%})"
         informed_cell = f"{rec['informed_p']:.1%}" if rec["informed_p"] is not None else "&mdash;"
         rows.append(
-            f"<tr><td>{rec['turn']}</td><td>{rec['n']}</td><td>{naive_cell}</td>"
+            f"<tr><td>{rec['turn']}</td><td>{rec['n_after']}</td><td>{naive_cell}</td>"
             f"<td>{informed_cell}</td><td>{rec['solved_by_now']:.1%}</td></tr>"
         )
     st.markdown(
         '<div class="stats-history-wrap"><table class="stats-history"><thead><tr>'
-        "<th>Guess</th><th>Remaining</th><th>Naive</th><th>Informed</th><th>Solved by now</th>"
+        "<th>Guess</th><th>Remaining after</th><th>Naive</th><th>Informed</th><th>Solved by now</th>"
         f"</tr></thead><tbody>{''.join(rows)}</tbody></table></div>",
         unsafe_allow_html=True,
     )
@@ -438,14 +434,16 @@ def main() -> None:
 
                 h = informed_p if informed_p is not None else naive_p
                 st.session_state.surv = 0.0 if won else st.session_state.surv * (1 - h)
+                candidates_after = filter_candidates(st.session_state.candidates, [(guess, pattern)])
                 st.session_state.stats_history.append(
                     {
                         "turn": turn,
                         "n": n,
+                        "n_after": len(candidates_after),
                         "naive_p": naive_p,
                         "informed_p": informed_p,
                         "solved_by_now": 1 - st.session_state.surv,
-                        "candidates": list(st.session_state.candidates) if n <= 50 else None,
+                        "candidates": candidates_after if len(candidates_after) <= 50 else None,
                     }
                 )
 
@@ -468,27 +466,20 @@ def main() -> None:
         if st.session_state.analysis_results is not None:
             render_analysis_results(st.session_state.analysis_results)
         else:
-            if st.session_state.analysis_turns is None:
-                turns = prepare_turns(st.session_state.guess_history, word_list, secret)
-                st.session_state.analysis_turns = turns
-                st.session_state.analysis_estimate = estimate_seconds(turns, word_list)
-
-            turns = st.session_state.analysis_turns
-            est = st.session_state.analysis_estimate
-            if st.button(f"Run full guess-quality analysis (est. ~{est:.1f}s)"):
-                progress = st.progress(0.0, text="Scoring guesses against the field...")
-                results = run_full_analysis(
-                    turns,
-                    word_list,
-                    progress_cb=lambda f: progress.progress(
-                        f, text=f"Scoring guesses against the field... {f:.0%}"
-                    ),
-                )
-                progress.empty()
-                st.session_state.analysis_results = results
-                if st.session_state.user_id and st.session_state.game_id:
-                    db.save_turn_analysis(st.session_state.game_id, results)
-                st.rerun()
+            turns = prepare_turns(st.session_state.guess_history, word_list, secret)
+            progress = st.progress(0.0, text="Scoring your guesses against the field...")
+            results = run_full_analysis(
+                turns,
+                word_list,
+                progress_cb=lambda f: progress.progress(
+                    f, text=f"Scoring your guesses against the field... {f:.0%}"
+                ),
+            )
+            progress.empty()
+            st.session_state.analysis_results = results
+            if st.session_state.user_id and st.session_state.game_id:
+                db.save_turn_analysis(st.session_state.game_id, results)
+            st.rerun()
 
     if st.session_state.error:
         st.error(st.session_state.error)
