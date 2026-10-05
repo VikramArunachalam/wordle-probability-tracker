@@ -13,7 +13,7 @@ create unique index users_nickname_lower_idx on users (lower(nickname));
 
 create table games (
     id serial primary key,
-    user_id integer not null references users(id),
+    user_id integer not null references users(id) on delete cascade,
     secret text not null,
     won boolean not null,
     num_guesses integer not null,
